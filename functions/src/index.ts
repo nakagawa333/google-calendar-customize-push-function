@@ -101,8 +101,7 @@ export const sendPushNotificationToFcm = onRequest(async(request, response) => {
         return;
     }
 
-    let multicastMessageTasks:Promise<BatchResponse>[] = [];
-
+    let multicastMessages:MulticastMessage[] = [];
 
     if(events){
         for(let event of events){
@@ -146,7 +145,8 @@ export const sendPushNotificationToFcm = onRequest(async(request, response) => {
                     },
                     tokens:tokens
                 }
-                multicastMessageTasks.push(admin.messaging().sendEachForMulticast(multicastMessage));
+
+                multicastMessages.push(multicastMessage);
             }
         }
     }
@@ -175,7 +175,6 @@ export const sendPushNotificationToFcm = onRequest(async(request, response) => {
     }
     let res:any = await axios.post(reqUrl,reqBody);
     if(res.data && Array.isArray(res.data.tasks)){
-        // let depth:number = getSubArrMaxDepth(res.data.tasks);
         let tasks = res.data.tasks.flat(1);
         for(let task of tasks){
             let title = task.title;
@@ -202,7 +201,8 @@ export const sendPushNotificationToFcm = onRequest(async(request, response) => {
                     tokens:tokens
                 }
 
-                multicastMessageTasks.push(admin.messaging().sendEachForMulticast(multicastMessage));
+                multicastMessages.push(multicastMessage);
+
             }
         }
     }
@@ -212,11 +212,17 @@ export const sendPushNotificationToFcm = onRequest(async(request, response) => {
         throw new Error(error.message);
     }
 
-    let arrMulticastMessageTasks = sliceArray(multicastMessageTasks,10);
+    let multicastMessageTasks:Promise<BatchResponse>[] = [];
+
+    for(let multicastMessage of multicastMessages){
+        multicastMessageTasks.push(admin.messaging().sendEachForMulticast(multicastMessage));
+    }
+
+    let arrMulticastMessageTasks = sliceArray(multicastMessageTasks,3);
 
     for(let multicastMessageTask of arrMulticastMessageTasks){
         try{
-            await Promise.all(multicastMessageTask);
+            await sendEachForMulticastWithRetry(5,3000,0,multicastMessageTask);
         } catch(error:any){
             console.error(error);
             let res = {
@@ -224,6 +230,8 @@ export const sendPushNotificationToFcm = onRequest(async(request, response) => {
             }
             response.json(res).status(400);
         }
+
+        await sleep(2000);
     }
 
     let res = {
@@ -232,6 +240,35 @@ export const sendPushNotificationToFcm = onRequest(async(request, response) => {
 
     response.json(res).status(200);
 });
+
+
+/**
+ * 
+ * @param retryCount リトライ回数
+ * @param waitTime  
+ */
+const sendEachForMulticastWithRetry = async(retryCount:number,waitTime:number,count:number,multicastMessageTask:any[]) => {
+    if(retryCount === count) {
+        console.error("メッセージの送信に失敗しました");
+    }
+
+    try{
+        await Promise.all(multicastMessageTask);
+    } catch(error:any){
+        console.warn(`メッセージの送信に失敗しました。${count}回目`);
+        setTimeout(() => {
+            sendEachForMulticastWithRetry(retryCount - 1,waitTime,count + 1,multicastMessageTask);
+        },waitTime);
+    }
+}
+
+const sleep = async(time:number) => {
+    return new Promise((reslve:any,reject:any) => {
+        setTimeout(() => {
+            return reslve();
+        }, time);
+    })
+}
 
 
 const sliceArray = (arr:any[],sliceNum:number) => {
