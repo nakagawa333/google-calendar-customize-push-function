@@ -6,7 +6,7 @@ import { BatchResponse, MulticastMessage } from "firebase-admin/lib/messaging/me
 import axios from "axios";
 import * as dayjs from "dayjs";
 import { calendar_v3, google } from "googleapis";
-import { getFirestoreDocData, isExsitsFirestoreCollection } from "./firestore/firestore";
+import { deleteDocuments, getFirestoreDocData, isExsitsFirestoreCollection } from "./firestore/firestore";
 require('dotenv').config();
 
 const GOOGLE_CLIENT_EMAIL:string = process.env.CLIENT_EMAIL? process.env.CLIENT_EMAIL : "";
@@ -137,7 +137,7 @@ export const sendPushNotificationToFcm = onRequest(async(request, response) => {
                 }
             }
 
-            if(summary){
+            if(summary !== undefined && summary !== null){
                 const multicastMessage:MulticastMessage = {
                     notification:{
                         title:summary,
@@ -191,7 +191,7 @@ export const sendPushNotificationToFcm = onRequest(async(request, response) => {
                 body += `予定の開始まで${diffDay}日前です。`;
             }
 
-            if(title){
+            if(title !== undefined){
                 //複数デバイスに送信
                 const multicastMessage:MulticastMessage = {
                     notification:{
@@ -221,8 +221,9 @@ export const sendPushNotificationToFcm = onRequest(async(request, response) => {
     let arrMulticastMessageTasks = sliceArray(multicastMessageTasks,3);
 
     for(let multicastMessageTask of arrMulticastMessageTasks){
+        let batchResponse;
         try{
-            await sendEachForMulticastWithRetry(5,3000,0,multicastMessageTask);
+            batchResponse = await sendEachForMulticastWithRetry(5,3000,0,multicastMessageTask);
         } catch(error:any){
             console.error(error);
             let res = {
@@ -231,6 +232,21 @@ export const sendPushNotificationToFcm = onRequest(async(request, response) => {
             response.json(res).status(400);
         }
 
+        if(Array.isArray(batchResponse) && 0 < batchResponse.length){
+            let deleteTokens:string[] = [];
+            batchResponse.map((res:any,index:number) => {
+                if(res.success === false){
+                    deleteTokens.push(tokens[index]);
+                }
+            })
+
+            try{
+                await deleteDocuments(collectionName,deleteTokens);
+            } catch(error:any){
+                console.error(error);
+            }
+            console.info(deleteTokens);
+        }
         await sleep(2000);
     }
 
@@ -250,16 +266,22 @@ export const sendPushNotificationToFcm = onRequest(async(request, response) => {
 const sendEachForMulticastWithRetry = async(retryCount:number,waitTime:number,count:number,multicastMessageTask:any[]) => {
     if(retryCount === count) {
         console.error("メッセージの送信に失敗しました");
+        throw new Error("メッセージの送信に失敗しました");
     }
 
+    let response:any = [];
     try{
-        await Promise.all(multicastMessageTask);
+        let res:any = await Promise.all(multicastMessageTask);
+        if(Array.isArray(res) && 0 < res.length){
+            response = res[0].responses;
+        }
     } catch(error:any){
         console.warn(`メッセージの送信に失敗しました。${count}回目`);
         setTimeout(() => {
             sendEachForMulticastWithRetry(retryCount - 1,waitTime,count + 1,multicastMessageTask);
         },waitTime);
     }
+    return response;
 }
 
 const sleep = async(time:number) => {
