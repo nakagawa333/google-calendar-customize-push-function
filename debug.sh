@@ -1,6 +1,1 @@
-cd functions
-functions start
-functions deploy sendPushNotificationToFcm --trigger-http
-functions inspect sendPushNotificationToFcm
-functions call sendPushNotificationToFcm
-
+npx firebase emulators:start --inspect-functions --only functions,firestore
