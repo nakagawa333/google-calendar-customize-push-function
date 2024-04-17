@@ -240,14 +240,14 @@ export const sendPushNotificationToFcm = onRequest(async(request, response) => {
                 }
             })
 
-            try{
-                await deleteDocuments(collectionName,deleteTokens);
-            } catch(error:any){
-                console.error(error);
+            if(0 < deleteTokens.length){
+                try{
+                    await deleteDocuments(collectionName,deleteTokens);
+                } catch(error:any){
+                    console.error(error);
+                }
             }
-            console.info(deleteTokens);
         }
-        await sleep(2000);
     }
 
     let res = {
@@ -277,9 +277,8 @@ const sendEachForMulticastWithRetry = async(retryCount:number,waitTime:number,co
         }
     } catch(error:any){
         console.warn(`メッセージの送信に失敗しました。${count}回目`);
-        setTimeout(() => {
-            sendEachForMulticastWithRetry(retryCount - 1,waitTime,count + 1,multicastMessageTask);
-        },waitTime);
+        await sleep(waitTime);
+        sendEachForMulticastWithRetry(retryCount - 1,waitTime,count + 1,multicastMessageTask);
     }
     return response;
 }
